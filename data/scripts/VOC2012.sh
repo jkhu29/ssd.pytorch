@@ -7,7 +7,7 @@ start=`date +%s`
 if [ -z "$1" ]
   then
     # navigate to ~/data
-    echo "navigating to ~/data/ ..." 
+    echo "navigating to /home/jkhu29/ssd.pytorch/data/ ..." 
     mkdir -p ~/data
     cd ~/data/
   else
