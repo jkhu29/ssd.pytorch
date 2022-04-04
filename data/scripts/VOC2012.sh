@@ -8,8 +8,8 @@ if [ -z "$1" ]
   then
     # navigate to ~/data
     echo "navigating to /home/jkhu29/ssd.pytorch/data/ ..." 
-    mkdir -p ~/data
-    cd ~/data/
+    mkdir -p /home/jkhu29/ssd.pytorch/data
+    cd /home/jkhu29/ssd.pytorch/data/
   else
     # check if is valid directory
     if [ ! -d $1 ]; then

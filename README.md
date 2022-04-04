@@ -5,7 +5,7 @@
 ```shell
 sh data/scripts/VOC2007.sh
 sh data/scripts/VOC2012.sh
-python train.py
+python -W ignore train.py
 ```
 
 ## TODO
