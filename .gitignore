@@ -125,6 +125,8 @@ data/datasets/
 data/ssd_dataloader.py
 data/VOCdevkit/
 data/*.tar
+data/PASCAL_format/
+data/PASCAL_format/Default/
 
 # pylint
 .pylintrc

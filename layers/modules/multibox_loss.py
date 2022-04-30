@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
+
 from data import coco as cfg
+from .focal_loss import FocalLoss
+from ..functions import tools
 from ..box_utils import match, log_sum_exp
 
 
@@ -56,7 +58,7 @@ class MultiBoxLoss(nn.Module):
                 priors shape: torch.size(num_priors,4)
 
             targets (tensor): Ground truth boxes and labels for a batch,
-                shape: [batch_size,num_objs,5] (last idx is the label).
+                shape: [batch_size, num_objs, 5] (last idx is the label).
         """
         loc_data, conf_data, priors = predictions
         num = loc_data.size(0)
@@ -64,8 +66,8 @@ class MultiBoxLoss(nn.Module):
         num_priors = (priors.size(0))
 
         # match priors (default boxes) and ground truth boxes
-        loc_t = torch.Tensor(num, num_priors, 4)
-        conf_t = torch.LongTensor(num, num_priors)
+        loc_t = torch.Tensor(num, num_priors, 4).requires_grad_(False)
+        conf_t = torch.LongTensor(num, num_priors).requires_grad_(False)
         if self.use_gpu:
             loc_t = loc_t.cuda()
             conf_t = conf_t.cuda()
@@ -79,9 +81,6 @@ class MultiBoxLoss(nn.Module):
                 self.variance, labels, 
                 loc_t, conf_t, idx
             )
-        # wrap targets
-        loc_t = Variable(loc_t, requires_grad=False)
-        conf_t = Variable(conf_t, requires_grad=False)
 
         pos = conf_t > 0
         num_pos = pos.sum(dim=1, keepdim=True)
@@ -91,14 +90,14 @@ class MultiBoxLoss(nn.Module):
         pos_idx = pos.unsqueeze(pos.dim()).expand_as(loc_data)
         loc_p = loc_data[pos_idx].view(-1, 4)
         loc_t = loc_t[pos_idx].view(-1, 4)
-        loss_l = F.smooth_l1_loss(loc_p, loc_t, size_average=False)
+        loss_l = F.smooth_l1_loss(loc_p, loc_t, reduction="sum")
 
         # Compute max conf across batch for hard negative mining
         batch_conf = conf_data.view(-1, self.num_classes)
         loss_c = log_sum_exp(batch_conf) - batch_conf.gather(1, conf_t.view(-1, 1))
 
         # Hard Negative Mining
-        loss_c = loss_c.view(num, -1)
+        loss_c = loss_c.view(pos.size()[0], pos.size()[1])
         loss_c[pos] = 0  # filter out pos boxes for now
         _, loss_idx = loss_c.sort(1, descending=True)
         _, idx_rank = loss_idx.sort(1)
@@ -111,11 +110,15 @@ class MultiBoxLoss(nn.Module):
         neg_idx = neg.unsqueeze(2).expand_as(conf_data)
         conf_p = conf_data[(pos_idx+neg_idx).gt(0)].view(-1, self.num_classes)
         targets_weighted = conf_t[(pos+neg).gt(0)]
-        loss_c = F.cross_entropy(conf_p, targets_weighted, size_average=False)
+        loss_c = F.cross_entropy(conf_p, targets_weighted, reduction="sum")
 
-        # Sum of losses: L(x,c,l,g) = (Lconf(x, c) + αLloc(x,l,g)) / N
+        # IOU Loss
+        ciou = tools.CIOU_xywh_torch(loc_p, loc_t).unsqueeze(-1)
+        bbox_loss_scale = 2.0 - 1.0 * loc_t[..., 2:3] * loc_t[..., 3:4]
+        loss_ciou = bbox_loss_scale * (1.0 - ciou)
+        loss_ciou = loss_ciou.mean()
 
         N = num_pos.data.sum()
         loss_l /= N
         loss_c /= N
-        return loss_l, loss_c
+        return loss_l, loss_c, loss_ciou

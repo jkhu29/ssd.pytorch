@@ -78,7 +78,7 @@ class SSD(nn.Module):
         self.num_classes = num_classes
         self.cfg = (coco, voc)[num_classes == 21]
         self.priorbox = PriorBox(self.cfg)
-        self.priors = Variable(self.priorbox.forward().requires_grad_(False))
+        self.priors = self.priorbox.forward().requires_grad_(False)
         self.size = size
 
         # SSD network, use mobilenetv1
@@ -92,12 +92,8 @@ class SSD(nn.Module):
                     ConvDW(128, 256, 2),
                     ConvDW(256, 256, 1),
                     ConvDW(256, 512, 2),
-                    ConvDW(512, 512, 1),
                 ),
                 nn.Sequential(
-                    ConvDW(512, 512, 1),
-                    ConvDW(512, 512, 1),
-                    ConvDW(512, 512, 1),
                     ConvDW(512, 512, 1),
                     ConvDW(512, 1024, 2),
                     ConvDW(1024, 1024, 1),
@@ -114,7 +110,6 @@ class SSD(nn.Module):
         self.conf = nn.ModuleList(conf_layers)
 
         if phase == 'test':
-            self.softmax = nn.Softmax(dim=-1)
             self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
 
     def multibox(self, extra_layers, cfg, num_classes):
@@ -172,16 +167,17 @@ class SSD(nn.Module):
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
-            output = self.detect(
-                loc.view(loc.size(0), -1, 4),                   # loc preds
-                self.softmax(conf.view(conf.size(0), -1, self.num_classes)),                # conf preds
-                self.priors.type(type(x.data))                  # default boxes
+            output = self.detect.apply(
+                21, 0, 200, 0.01, 0.45,
+                loc.view(loc.size(0), -1, 4),      # loc preds
+                torch.softmax(conf.view(conf.size(0), -1, self.num_classes), dim=-1),   # conf preds
+                self.priors.to(x.device)           # default boxes
             )
         else:
             output = (
                 loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes),
-                self.priors
+                self.priors.to(x.device)
             )
         return output
 

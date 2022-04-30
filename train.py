@@ -6,10 +6,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torch.backends.cudnn as cudnn
-from torch.autograd import Variable
 import torch.utils.data as data
 
 from data import *
+import utils
 from utils.augmentations import SSDAugmentation
 from layers.modules import MultiBoxLoss
 from ssd import build_ssd
@@ -26,7 +26,7 @@ parser.add_argument('--dataset', default='VOC', choices=['VOC', 'COCO'],
                     type=str, help='VOC or COCO')
 parser.add_argument('--dataset_root', default=VOC_ROOT,
                     help='Dataset root directory path')
-parser.add_argument('--batch_size', default=2, type=int,
+parser.add_argument('--batch_size', default=16, type=int,
                     help='Batch size for training')
 parser.add_argument('--resume', default=None, type=str,
                     help='Checkpoint state_dict file to resume training from')
@@ -38,14 +38,10 @@ parser.add_argument('--cuda', default=True, type=str2bool,
                     help='Use CUDA to train model')
 parser.add_argument('--lr', '--learning-rate', default=1e-3, type=float,
                     help='initial learning rate')
-parser.add_argument('--momentum', default=0.9, type=float,
-                    help='Momentum value for optim')
-parser.add_argument('--weight_decay', default=5e-4, type=float,
-                    help='Weight decay for SGD')
-parser.add_argument('--gamma', default=0.1, type=float,
-                    help='Gamma update for SGD')
 parser.add_argument('--save_folder', default='weights/',
                     help='Directory for saving checkpoint models')
+parser.add_argument('--epoch', default=120, type=int)
+parser.add_argument('--gamma', default=0.3, type=int)
 args = parser.parse_args()
 
 
@@ -61,44 +57,31 @@ def train():
         dataset = VOCDetection(root=args.dataset_root, transform=SSDAugmentation(cfg['min_dim'], MEANS))
 
     ssd_net = build_ssd('train', cfg['min_dim'], cfg['num_classes'])
-    net = ssd_net
 
     if args.cuda:
-        net = torch.nn.DataParallel(ssd_net)
+        ssd_net = ssd_net.cuda()
         cudnn.benchmark = True
 
     if args.resume:
         print('Resuming training, loading {}...'.format(args.resume))
         ssd_net.load_weights(args.resume)
-
-    if args.cuda:
-        net = net.cuda()
-
-    if not args.resume:
+    else:
         print('Initializing weights...')
         # initialize newly added layers' weights with xavier method
         ssd_net.extras.apply(weights_init)
         ssd_net.loc.apply(weights_init)
         ssd_net.conf.apply(weights_init)
 
-    optimizer = optim.SGD(
-        net.parameters(), lr=args.lr, momentum=args.momentum,
-        weight_decay=args.weight_decay
-    )
+    optimizer = optim.AdamW(ssd_net.parameters(), lr=args.lr)
     criterion = MultiBoxLoss(
         cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
         False, args.cuda
     )
 
-    net.train()
     # loss counters
-    loc_loss = 0
-    conf_loss = 0
     print('Loading the dataset...')
 
     print('Training SSD on:', dataset.name)
-    print('Using the specified args:')
-    print(args)
 
     step_index = 0
 
@@ -108,50 +91,57 @@ def train():
         shuffle=True, collate_fn=detection_collate,
         pin_memory=True
     )
-    # create batch iterator
-    batch_iterator = iter(data_loader)
-    for iteration in range(args.start_iter, cfg['max_iter']):
-        if iteration in cfg['lr_steps']:
-            step_index += 1
-            adjust_learning_rate(optimizer, args.gamma, step_index)
 
-        # load train data
-        images, targets = next(batch_iterator)
-        if args.cuda:
-            images = images.cuda()
-            targets = [ann.cuda().requires_grad_(False) for ann in targets]
-        else:
-            images = images
-            targets = [ann.requires_grad_(False) for ann in targets]
+    ssd_net.train()
+    for epoch in range(args.epoch):
+        loss_average = utils.AverageMeter()
+        loss_l_average = utils.AverageMeter()
+        loss_c_average = utils.AverageMeter()
+        loss_ciou_average = utils.AverageMeter()
+        for i, (images, targets) in enumerate(data_loader):
+            iteration = epoch * len(data_loader) + i
+            if iteration in cfg['lr_steps']:
+                step_index += 1
+                adjust_learning_rate(optimizer, args.gamma, step_index)
 
-        # forward
-        t0 = time.time()
-        out = net(images)
+            # load train data
+            if args.cuda:
+                images = images.cuda()
+                targets = [ann.cuda().requires_grad_(False) for ann in targets]
+            else:
+                images = images
+                targets = [ann.requires_grad_(False) for ann in targets]
 
-        # backprop
-        optimizer.zero_grad()
-        loss_l, loss_c = criterion(out, targets)
-        loss = loss_l + loss_c
-        loss.backward()
-        optimizer.step()
-        t1 = time.time()
-        loc_loss += loss_l.item()
-        conf_loss += loss_c.item()
+            # forward
+            out = ssd_net(images)
 
-        if iteration % 10 == 0:
-            print('timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ' || Loss: %.4f ||' % (loss.item()), end=' ')
+            # backprop
+            optimizer.zero_grad()
+            loss_l, loss_c, loss_ciou = criterion(out, targets)
+            loss = loss_l + loss_c + loss_ciou
+            loss.backward()
+            optimizer.step()
 
-        if iteration != 0 and iteration % 5000 == 0:
-            print('Saving state, iter:', iteration)
-            torch.save(
-                ssd_net.state_dict(), 
-                'weights/ssd300_COCO_' + repr(iteration) + '.pth'
-            )
-    torch.save(
-        ssd_net.state_dict(),
-        args.save_folder + '' + args.dataset + '.pth'
-    )
+            loss_average.update(loss.item(), args.batch_size)
+            loss_l_average.update(loss_l.item(), args.batch_size)
+            loss_c_average.update(loss_c.item(), args.batch_size)
+            loss_ciou_average.update(loss_ciou.item(), args.batch_size)
+
+            if iteration % 100 == 0:
+                print('iter ' + repr(iteration) + \
+                ' || Loss: %.4f' % (loss_average.avg) + \
+                ' || LossLoc: %.4f' % (loss_l_average.avg) + \
+                ' || LossConf: %.4f' % (loss_c_average.avg) + \
+                ' || LossCIOU: %.4f' % (loss_ciou_average.avg)
+                , end='\n')
+
+            if iteration != 0 and iteration % 5000 == 0:
+                print('Saving state, iter:', iteration)
+                torch.save(
+                    ssd_net.state_dict(), 
+                    './weights/ssd_mobilenetv1_' + repr(iteration) + '.pth'
+                )
+        torch.cuda.empty_cache()
 
 
 def adjust_learning_rate(optimizer, gamma, step):
