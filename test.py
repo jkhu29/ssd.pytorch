@@ -2,6 +2,7 @@ from __future__ import print_function
 import sys
 import os
 import argparse
+import time
 import torch
 import torch.nn as nn
 import torch.backends.cudnn as cudnn
@@ -36,9 +37,12 @@ def test_net(save_folder, net, cuda, testset, transform, thresh):
         if cuda:
             x = x.cuda()
 
+        t0 = time.time()
         # forward pass
         with torch.no_grad():
             detections = net(x)
+        t1 = time.time()
+        print("spend: {:.2f}s".format(t1 - t0))
 
         # scale each detection back up to the image
         scale = torch.Tensor([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])
@@ -65,13 +69,13 @@ def test_voc(args):
     num_classes = len(VOC_CLASSES) + 1 # +1 for background
     net = build_ssd('test', 300, num_classes) # initialize SSD
     net.load_state_dict(torch.load(args.trained_model))
-    net.eval()
-    print('Finished loading model!')
-    # load data
-    testset = VOCDetection(args.voc_root, [('2007', 'bicycle_test')], None, VOCAnnotationTransform())
     if args.cuda:
         net = net.cuda()
         cudnn.benchmark = True
+    net.eval()
+    print('Finished loading model!')
+    # load data
+    testset = VOCDetection(args.voc_root, [('2007', 'val')], None, VOCAnnotationTransform())
     # evaluation
     test_net(
         args.save_folder, net, args.cuda, testset,

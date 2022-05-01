@@ -21,36 +21,40 @@ class ConvBN(nn.Module):
         self.out_channels = out_channels
         
         self.conv = nn.Conv2d(in_channels, out_channels, 3, stride, 1, bias=False)
-        self.bn = nn.BatchNorm2d(out_channels)
-        self.relu = nn.ReLU(inplace=True)
+        # self.bn = nn.BatchNorm2d(out_channels)
+        # self.relu = nn.ReLU(inplace=True)
     
     def forward(self, x):
         x = self.conv(x)
-        x = self.bn(x)
-        x = self.relu(x)
+        # x = self.bn(x)
+        # x = self.relu(x)
         return x
 
 
 class ConvDW(nn.Module):
     def __init__(self, in_channels, out_channels, stride):
         super().__init__()
+        self.res = in_channels == out_channels
         self.out_channels = out_channels
         
-        self.conv1 = nn.Conv2d(in_channels, in_channels, 3, stride, 1, groups=in_channels, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, in_channels, 1, 1, 0, bias=False)
         self.bn1 = nn.BatchNorm2d(in_channels)
         self.relu1 = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(in_channels, out_channels, 1, 1, 0, bias=False)
+        self.conv2 = nn.Conv2d(in_channels, out_channels, 3, stride, 1, groups=in_channels, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.relu2 = nn.ReLU(inplace=True)
 
     def forward(self, x):
+        identity = x
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
         x = self.conv2(x)
         x = self.bn2(x)
         x = self.relu2(x)
+        if self.res:
+            x = x + identity
         return x
 
 
@@ -85,8 +89,7 @@ class SSD(nn.Module):
         self.backbone = nn.ModuleList(
             [
                 nn.Sequential(
-                    ConvBN(3, 32, 1),
-                    ConvDW(32, 64, 1),
+                    ConvBN(3, 64, 1),
                     ConvDW(64, 128, 2),
                     ConvDW(128, 128, 1),
                     ConvDW(128, 256, 2),

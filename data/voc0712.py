@@ -109,11 +109,14 @@ class VOCDetection(data.Dataset):
         for (year, name) in image_sets:
             rootpath = osp.join(self.root, 'VOC' + year)
             for line in open(osp.join(rootpath, 'ImageSets', 'Main', name + '.txt')):
-                self.ids.append((rootpath, line.strip()))
+                if " " in line:
+                    l = line.split(" ")[0]
+                else:
+                    l = line.strip()
+                self.ids.append((rootpath, l))
 
     def __getitem__(self, index):
-        im, gt, h, w = self.pull_item(index)
-
+        im, gt, _, _ = self.pull_item(index)
         return im, gt
 
     def __len__(self):
@@ -124,7 +127,7 @@ class VOCDetection(data.Dataset):
 
         target = ET.parse(self._annopath % img_id).getroot()
         img = cv2.imread(self._imgpath % img_id)
-        height, width, channels = img.shape
+        height, width, _ = img.shape
 
         if self.target_transform is not None:
             target = self.target_transform(target, width, height)
