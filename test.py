@@ -42,7 +42,7 @@ def test_net(save_folder, net, cuda, testset, transform, thresh):
         with torch.no_grad():
             detections = net(x)
         t1 = time.time()
-        print("spend: {:.2f}s".format(t1 - t0))
+        print("spend: {:.4f}s".format(t1 - t0))
 
         # scale each detection back up to the image
         scale = torch.Tensor([img.shape[1], img.shape[0], img.shape[1], img.shape[0]])

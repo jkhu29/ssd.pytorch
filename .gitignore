@@ -130,3 +130,6 @@ data/PASCAL_format/Default/
 
 # pylint
 .pylintrc
+
+*.onnx
+*.pth

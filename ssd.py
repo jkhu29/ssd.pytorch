@@ -34,9 +34,9 @@ class ConvBN(nn.Module):
 class ConvDW(nn.Module):
     def __init__(self, in_channels, out_channels, stride):
         super().__init__()
-        self.res = in_channels == out_channels
+        # self.res = in_channels == out_channels
         self.out_channels = out_channels
-        
+
         self.conv1 = nn.Conv2d(in_channels, in_channels, 1, 1, 0, bias=False)
         self.bn1 = nn.BatchNorm2d(in_channels)
         self.relu1 = nn.ReLU(inplace=True)
@@ -46,15 +46,12 @@ class ConvDW(nn.Module):
         self.relu2 = nn.ReLU(inplace=True)
 
     def forward(self, x):
-        identity = x
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu1(x)
         x = self.conv2(x)
         x = self.bn2(x)
         x = self.relu2(x)
-        if self.res:
-            x = x + identity
         return x
 
 
@@ -113,7 +110,7 @@ class SSD(nn.Module):
         self.conf = nn.ModuleList(conf_layers)
 
         if phase == 'test':
-            self.detect = Detect(num_classes, 0, 200, 0.01, 0.45)
+            self.detect = Detect(num_classes, 0, 10000, 0.01, 0.45)
 
     def multibox(self, extra_layers, cfg, num_classes):
         loc_layers = []
@@ -171,18 +168,21 @@ class SSD(nn.Module):
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
         if self.phase == "test":
             output = self.detect.apply(
-                21, 0, 200, 0.01, 0.45,
+                21, 0, 10000, 0.01, 0.45,
                 loc.view(loc.size(0), -1, 4),      # loc preds
                 torch.softmax(conf.view(conf.size(0), -1, self.num_classes), dim=-1),   # conf preds
                 self.priors.to(x.device)           # default boxes
             )
+            return output
+        elif self.phase == "convert":
+            return loc, conf
         else:
             output = (
                 loc.view(loc.size(0), -1, 4),
                 conf.view(conf.size(0), -1, self.num_classes),
                 self.priors.to(x.device)
             )
-        return output
+            return output
 
     def load_weights(self, base_file):
         _, ext = os.path.splitext(base_file)
@@ -209,13 +209,6 @@ def add_extras(cfg, in_channels, flag=False):
 
 
 def build_ssd(phase, size=300, num_classes=21):
-    if phase != "test" and phase != "train":
-        print("ERROR: Phase: " + phase + " not recognized")
-        return
-    if size != 300:
-        print("ERROR: You specified size " + repr(size) + ". However, " +
-              "currently only SSD300 (size=300) is supported!")
-        return
     return SSD(phase, size, num_classes)
 
 

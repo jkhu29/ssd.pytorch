@@ -54,7 +54,10 @@ def train():
         pass
     elif args.dataset == 'VOC':
         cfg = voc
-        dataset = VOCDetection(root=args.dataset_root, transform=SSDAugmentation(cfg['min_dim'], MEANS))
+        if not args.resume:
+            dataset = VOCDetection(root=args.dataset_root, transform=SSDAugmentation(cfg['min_dim'], MEANS))
+        else:
+            dataset = VOCDetection(root=args.dataset_root, transform=BaseTransform(300, (104, 117, 123)))
 
     ssd_net = build_ssd('train', cfg['min_dim'], cfg['num_classes'])
 
