@@ -75,7 +75,7 @@ def train():
         ssd_net.loc.apply(weights_init)
         ssd_net.conf.apply(weights_init)
 
-    optimizer = optim.AdamW(ssd_net.parameters(), lr=args.lr)
+    optimizer = optim.Adam(ssd_net.parameters(), lr=args.lr, weight_decay=1e-5)
     criterion = MultiBoxLoss(
         cfg['num_classes'], 0.5, True, 0, True, 3, 0.5,
         False, args.cuda

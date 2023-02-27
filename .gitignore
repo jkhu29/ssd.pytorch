@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *$py.class
+paddle_lite/
 
 # C extensions
 *.so

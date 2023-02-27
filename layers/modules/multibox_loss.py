@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from data import coco as cfg
-from .focal_loss import FocalLoss
 from ..functions import tools
 from ..box_utils import match, log_sum_exp
+from .focal_loss import FocalLoss
 
 
 class MultiBoxLoss(nn.Module):
@@ -47,6 +47,7 @@ class MultiBoxLoss(nn.Module):
         self.negpos_ratio = neg_pos
         self.neg_overlap = neg_overlap
         self.variance = cfg['variance']
+        self.focal_loss = FocalLoss()
 
     def forward(self, predictions, targets):
         """Multibox Loss
@@ -110,7 +111,8 @@ class MultiBoxLoss(nn.Module):
         neg_idx = neg.unsqueeze(2).expand_as(conf_data)
         conf_p = conf_data[(pos_idx+neg_idx).gt(0)].view(-1, self.num_classes)
         targets_weighted = conf_t[(pos+neg).gt(0)]
-        loss_c = F.cross_entropy(conf_p, targets_weighted, reduction="sum")
+        # loss_c = F.cross_entropy(conf_p, targets_weighted, reduction="sum")
+        loss_c = self.focal_loss.compute(conf_p, targets_weighted)
 
         # IOU Loss
         ciou = tools.CIOU_xywh_torch(loc_p, loc_t).unsqueeze(-1)

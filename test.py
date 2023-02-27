@@ -84,8 +84,7 @@ def test_voc(args):
     )
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(
-        description='Single Shot MultiBox Detection')
+    parser = argparse.ArgumentParser(description='Single Shot MultiBox Detection')
     parser.add_argument('--trained_model', default='pretrain.pth',
                         type=str, help='Trained state_dict file path to open')
     parser.add_argument('--save_folder', default='eval/', type=str,

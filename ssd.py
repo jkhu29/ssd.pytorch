@@ -21,13 +21,13 @@ class ConvBN(nn.Module):
         self.out_channels = out_channels
         
         self.conv = nn.Conv2d(in_channels, out_channels, 3, stride, 1, bias=False)
-        # self.bn = nn.BatchNorm2d(out_channels)
-        # self.relu = nn.ReLU(inplace=True)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
     
     def forward(self, x):
         x = self.conv(x)
-        # x = self.bn(x)
-        # x = self.relu(x)
+        x = self.bn(x)
+        x = self.relu(x)
         return x
 
 
@@ -37,11 +37,11 @@ class ConvDW(nn.Module):
         # self.res = in_channels == out_channels
         self.out_channels = out_channels
 
-        self.conv1 = nn.Conv2d(in_channels, in_channels, 1, 1, 0, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, in_channels, 3, stride, 1, groups=in_channels, bias=False)
         self.bn1 = nn.BatchNorm2d(in_channels)
         self.relu1 = nn.ReLU(inplace=True)
 
-        self.conv2 = nn.Conv2d(in_channels, out_channels, 3, stride, 1, groups=in_channels, bias=False)
+        self.conv2 = nn.Conv2d(in_channels, out_channels, 1, 1, 0, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
         self.relu2 = nn.ReLU(inplace=True)
 
@@ -92,8 +92,12 @@ class SSD(nn.Module):
                     ConvDW(128, 256, 2),
                     ConvDW(256, 256, 1),
                     ConvDW(256, 512, 2),
+                    ConvDW(512, 512, 1),
                 ),
                 nn.Sequential(
+                    ConvDW(512, 512, 1),
+                    ConvDW(512, 512, 1),
+                    ConvDW(512, 512, 1),
                     ConvDW(512, 512, 1),
                     ConvDW(512, 1024, 2),
                     ConvDW(1024, 1024, 1),
@@ -110,7 +114,7 @@ class SSD(nn.Module):
         self.conf = nn.ModuleList(conf_layers)
 
         if phase == 'test':
-            self.detect = Detect(num_classes, 0, 10000, 0.01, 0.45)
+            self.detect = Detect()
 
     def multibox(self, extra_layers, cfg, num_classes):
         loc_layers = []
@@ -146,8 +150,6 @@ class SSD(nn.Module):
                     3: priorbox layers, Shape: [2, num_priors * 4]
         """
         features = []
-        loc = []
-        conf = []
 
         for layer in self.backbone:
             x = layer(x)
@@ -159,6 +161,8 @@ class SSD(nn.Module):
             if i % 2 == 1:
                 features.append(x)
 
+        loc = []
+        conf = []
         # apply multibox head to source layers
         for (f, l, c) in zip(features, self.loc, self.conf):
             loc.append(l(f).permute(0, 2, 3, 1).contiguous())
@@ -166,16 +170,18 @@ class SSD(nn.Module):
 
         loc = torch.cat([o.view(o.size(0), -1) for o in loc], 1)
         conf = torch.cat([o.view(o.size(0), -1) for o in conf], 1)
+
         if self.phase == "test":
-            output = self.detect.apply(
-                21, 0, 10000, 0.01, 0.45,
+            output = self.detect.forward(
+                21, 0, 200, 0.01, 0.45,
                 loc.view(loc.size(0), -1, 4),      # loc preds
                 torch.softmax(conf.view(conf.size(0), -1, self.num_classes), dim=-1),   # conf preds
                 self.priors.to(x.device)           # default boxes
             )
             return output
         elif self.phase == "convert":
-            return loc, conf
+            output = loc.view(loc.size(0), -1, 4), \
+                torch.softmax(conf.view(conf.size(0), -1, self.num_classes), dim=-1)
         else:
             output = (
                 loc.view(loc.size(0), -1, 4),
